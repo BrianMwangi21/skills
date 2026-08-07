@@ -120,12 +120,34 @@ bundle); running a sub-step directly bypasses that and silently produces a
 broken stack (e.g. a client that points at the wrong port). One blessed
 entry point, no improvising.
 
+**Parallel agents: use a slot.** If you are running as one of several
+concurrent spec-writing agents (typically in a git worktree; seed the
+worktree's node_modules from the main checkout with `cp -Rc` on macOS or
+`cp -a --reflink=auto` on Linux before running the bootstrap, else its
+`npm ci` pays the full install), or the default
+ports are held by someone else's stack, bring the stack up with
+`./e2e/scripts/e2e-up.sh --slot auto` instead. Both repos support this. It
+claims an isolated instance (own backend, databases and ports; shared
+elasticsearch and redis; mongo is per-slot in client-core and shared in
+planning) and writes its environment to a slot env file (client-core:
+`e2e/client/playwright/.cache/e2e-slot.env`, planning: `e2e/.e2e-slot.env`),
+which the playwright config auto-loads, so every `npx playwright ...` command in steps 3-9
+works unchanged from this checkout. Do not export `SUPERDESK_URL` or port
+variables by hand in slot mode. Note which slot you used in your hand-off,
+and leave it running for the user's verification; it is released with
+`./e2e/scripts/e2e-down.sh --slot <N>`. If `--slot auto` reports no free
+slot, relay that to the user rather than stealing one. Slots do not remove
+the cross-repo constraint: client-core and planning e2e stacks cannot run at
+the same time (both bind mongo/redis/elastic host ports).
+
 **If the script exits non-zero, it tells you what to do, relay that, do not
 work around it.** The script fails loud and actionable: it verifies the app
 bundles were actually built and that the client serves them, not just that a
 port answers. Its most common recovery instruction is to re-run with
-`--rebuild` (`./e2e/scripts/e2e-up.sh --rebuild`). Run that once. If it still
-fails, surface the script's plain-English error message to the user verbatim;
+`--rebuild` (`./e2e/scripts/e2e-up.sh --rebuild`). Run that once. Note that `--rebuild`
+fixes client build/bundle problems only; an error about docker images or
+image pulls is not a build problem and `--rebuild` cannot help there. If it
+still fails, surface the script's plain-English error message to the user verbatim;
 do not paste raw stack traces or webpack output at a QA user, and do not try
 to repair the build yourself. A non-technical user only needs the one-line
 instruction or a clear "this needs a developer because X."
@@ -288,9 +310,12 @@ so you don't improvise under pressure.
 `e2e/scripts/e2e-up.sh` exits non-zero or never reaches "ready". Read the
 error, the script names the failure mode.
 
-- **Port conflict** on 27017 / 6379 / 9200 / 5002 / 9000: the script's
-  preflight names the holder via `lsof`. Tell the user; do not kill their
-  processes.
+- **Port conflict** on 27017 / 6379 / 9200 / 5002 / 9000 (or, in slot mode,
+  the slot's ports: client-core 501N / 511N / 901N plus a per-slot mongo on
+  27017+N, planning 502N / 512N / 902N): the script's preflight names the
+  holder via `lsof`. Tell the user; do not kill their processes. If the
+  conflict is on the default 5002/9000 because another agent's stack is up,
+  switch to `--slot auto` instead.
 - **Docker not running:** ask the user to start Docker Desktop.
 - **Incomplete or stale build (blank app):** the script fails with a message
   about missing app bundles or the client not serving `app.bundle.js`. This is
